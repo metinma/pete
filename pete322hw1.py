@@ -3,32 +3,32 @@ import numpy as np
 
 def main():
     # Flow rate
-    Q = None
+    Q = 480
     # Viscometer @ 600 RPM
-    THETA_600 = None
+    THETA_600 = 300
     # Viscometer @ 300 RPM
-    THETA_300 = None
+    THETA_300 = 200
     # Viscometer @ 3 RPM
-    THETA_3 = None
+    THETA_3 = 10
     # Density
-    RHO = None
+    RHO = 10
     # True vertical depth
-    TVD = None
+    TVD = 10000
     # Outer diameter of each section
-    OD = np.array([])
+    OD = np.array([5, 4.5])
     # Inner diameter of each section
-    ID = np.array([])
+    ID = np.array([4, 3.5])
     # Length of each section
-    L = np.array([])
+    L = np.array([5000, 5000])
     # Mud weight
-    MW = None
+    MW = 10
     # Bit size
-    B = None
+    B = 8.5
     # Jet nozzle optimization constant
     # HHP = 0.65, IF = 0.48, balanced = 0.59
-    C = None
+    C = 0.59
     # Jet nozzle amount
-    N = None
+    N = 3
     # Surface equipment with: ([40, 55, 5, 40], [3.5, 2.5, 2.25, 3.25]) @ 480 GPM
     # Surface equipment pressure loss (psi)
     SEPD = 66
@@ -44,18 +44,11 @@ def main():
     print(
         f"Horsepower per square inch (HSI): {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[0]}")
     print(
-        f"Jet Impact Force: {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[2]}")
-    print(f"Optimum Nozzle Sizes: ")
+        f"Jet Impact Force: {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[1]}")
+    print(
+        f"Optimum Nozzle Sizes: {ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)}")
 
     return "Lubricated!"
-
-
-def sum_squared(n):
-    x = None
-    for i in np.size(n):
-        x += n[i] ** 2
-
-    return x
 
 
 # Laziness Machine
@@ -81,7 +74,9 @@ class FluidFlowType:
 
 
 def apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L):
-    for i in range(L):
+    apd = 0
+
+    for i in range(len(L)):
         # Va = annular fluid velocity for the interval (ft/sec)
         va = 0.408 * Q / (OD[i] ** 2 - ID[i] ** 2)
         # na = annular flow behavior index (dimensionless)
@@ -116,28 +111,31 @@ def apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L):
 
 
 def dspd(Q, RHO, ID, THETA_600, THETA_300, L):
-    for i in range(L):
+    dspd = 0
+
+    for i in range(len(L)):
         # Vp = pipe fluid velocity (ft/sec)
         vp = 0.408 * Q / ID[i] ** 2
         # np = pipe flow behavior index (dimensionless)
-        np = 3.32 * np.log(THETA_600 / THETA_300)
+        np_val = 3.32 * np.log(THETA_600 / THETA_300)
         # Kp = pipe consistency factor (poise)
-        kp = 5.11 * THETA_600 / 1022 ** np
+        kp = 5.11 * THETA_600 / 1022 ** np_val
         # μep = pipe effective viscosity (cp)
-        muep = 100 * kp * (96 * vp / ID[i]) ** (np - 1)
+        muep = 100 * kp * (96 * vp / ID[i]) ** (np_val - 1)
         # Rep = pipe Reynolds number (dimensionless)
-        rep = 928 * vp * ID[i] * RHO / (muep * ((3 * np + 1) / (4 * np)) ** np)
+        rep = 928 * vp * ID[i] * RHO / \
+            (muep * ((3 * np_val + 1) / (4 * np_val)) ** np_val)
         # ReL = the laminar to transitional flow Reynolds number (dimensionless)
-        rel = 3470 - 1370 * np
+        rel = 3470 - 1370 * np_val
         # ReT = the laminar to transitional flow Reynolds number (dimensionless)
-        ret = 4270 - 1370 * np
+        ret = 4270 - 1370 * np_val
         # fp = the pipe fanning friction factor (dimensionless)
         if rep < rel:
-            fp = FluidFlowType(16, rep, rel, ret, np).laminar_flow()
+            fp = FluidFlowType(16, rep, rel, ret, np_val).laminar_flow()
         elif ret < rep:
-            fp = FluidFlowType(16, rep, rel, ret, np).transient_flow()
+            fp = FluidFlowType(16, rep, rel, ret, np_val).transient_flow()
         elif rel < rep < ret:
-            fp = FluidFlowType(16, rep, rel, ret, np).turbulent_flow()
+            fp = FluidFlowType(16, rep, rel, ret, np_val).turbulent_flow()
         # Pp = the pipe pressure drop (psi)
         dspd += fp * vp ** 2 * RHO * L[i] / (25.81 * ID[i])
 
@@ -147,39 +145,40 @@ def dspd(Q, RHO, ID, THETA_600, THETA_300, L):
 # Maximum Standpipe Pressure
 def msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
     # PaT = total annular pressure loss (psi)
-    apd = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
+    apd_val = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
     # PpT = total drill string pressure loss (psi)
-    dspd = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
+    dspd_val = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
 
     # PMAX = maximum standpipe pressure (psi)
-    return apd + dspd + SEPD
+    return apd_val + dspd_val + SEPD
 
 
 # ΔPb (Pressure Loss at Bit)
 def dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
     # Maximum Standpipe Pressure
-    msppd = msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    msppd_val = msppd(Q, THETA_600, THETA_300, THETA_3,
+                      RHO, TVD, OD, ID, L, SEPD)
     # The annular pressure drop (psi)
-    apd = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
+    apd_val = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
     # Drillstring pressure drop
-    dspd = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
+    dspd_val = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
 
-    return msppd - apd - dspd - SEPD
+    return msppd_val - apd_val - dspd_val - SEPD
 
 
 # Jet optimization
 def ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N):
     # ΔPb (Pressure Loss at Bit)
-    dpb = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    dpb_val = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
     # At = optimum total nozzle area (in2)
-    at = Q / (2.96 * (1238.5 * C * dpb / RHO) ** 0.5)
-    j = np.array([])
+    at = Q / (2.96 * (1238.5 * C * dpb_val / RHO) ** 0.5)
+    j = np.zeros(N)
     j1 = (1303.797 / N * at) ** 0.5
-    np.append(j, j1)
+    j = np.append(j, j1)
 
     for i in range(N - 1):
         j[i + 1] = (1303.797 / (N - i - 1) *
-                    (at - (sum_squared(j) / 1303.797))) ** 0.5
+                    (at - (np.sum(j ** 2) / 1303.797))) ** 0.5
 
     return j
 
@@ -187,16 +186,16 @@ def ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N):
 # HSI and JIF
 def hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
     # ΔPb (Pressure Loss at Bit)
-    dpb = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    dpb_val = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
     # HHPb (Hydraulic Horsepower at the Bit)
-    hhp = Q * dpb / 1714
+    hhp = Q * dpb_val / 1714
 
     # HHPb/in2 (Hydraulic Horsepower per Square Inch of the Bit Area)
     # Optimized Drilling Range: 2.5 - 5.0
     hsi = hhp * 1.27 / B ** 2
 
     # Vn (Bit Nozzle Velocity)
-    vn = 417 * Q / sum_squared(j)
+    vn = 417 * Q / np.sum(j ** 2)
 
     # I.F. (Impact Force)
     jif = vn * Q * MW / 1930
