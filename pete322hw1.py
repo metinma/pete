@@ -2,17 +2,60 @@ import numpy as np
 
 
 def main():
-    # Surface equipment information
-    # Stand Pipe L, Hose L, Swivel L, Kelly L
-    SEL = [40, 55, 5, 40]
-    # Stand Pipe ID, Hose ID, Swivel ID, Kelly ID
-    SEID = [3.5, 2.5, 2.25, 3.25]
-    # Mud gallon per minute
-    SEGPM = 480
-    # Pressure loss
+    # Flow rate
+    Q = None
+    # Viscometer @ 600 RPM
+    THETA_600 = None
+    # Viscometer @ 300 RPM
+    THETA_300 = None
+    # Viscometer @ 3 RPM
+    THETA_3 = None
+    # Density
+    RHO = None
+    # True vertical depth
+    TVD = None
+    # Outer diameter of each section
+    OD = np.array([])
+    # Inner diameter of each section
+    ID = np.array([])
+    # Length of each section
+    L = np.array([])
+    # Mud weight
+    MW = None
+    # Bit size
+    B = None
+    # Jet nozzle optimization constant
+    # HHP = 0.65, IF = 0.48, balanced = 0.59
+    C = None
+    # Jet nozzle amount
+    N = None
+    # Surface equipment with: ([40, 55, 5, 40], [3.5, 2.5, 2.25, 3.25]) @ 480 GPM
+    # Surface equipment pressure loss (psi)
     SEPD = 66
+    # Jet nozzle sizes
+    j = ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)
+
+    print(
+        f"Standpipe Pressure: {msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)}")
+    print(
+        f"Equivalent Circulating Density (ECD): {apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[1]}")
+    print(
+        f"Bit Pressure Drop: {dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)}")
+    print(
+        f"Horsepower per square inch (HSI): {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[0]}")
+    print(
+        f"Jet Impact Force: {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[2]}")
+    print(f"Optimum Nozzle Sizes: ")
 
     return "Lubricated!"
+
+
+def sum_squared(n):
+    x = None
+    for i in np.size(n):
+        x += n[i] ** 2
+
+    return x
 
 
 # Laziness Machine
@@ -101,40 +144,50 @@ def dspd(Q, RHO, ID, THETA_600, THETA_300, L):
     return dspd
 
 
-""" Needs confirmation!
-def dcpd(Q, RHO, ID, THETA_600, THETA_300, L):
-    for i in range(L):
-        # Vc = collar fluid velocity (ft/sec)
-        vc = 0.408 * Q / ID[i] ** 2
-        # nc = collar flow behavior index (dimensionless)
-        nc = 3.32 * np.log(THETA_600 / THETA_300)
-        # Kc = collar consistency factor (poise)
-        kc = 5.11 * THETA_600 / 1022 ** nc
-        # μec = collar effective viscosity (cp)
-        muec = 100 * kc * (96 * vc / ID[i]) ** (nc - 1)
-        # Rec = collar Reynolds number (dimensionless)
-        rec = 928 * vc * ID[i] * RHO / (muec * ((3 * nc + 1) / (4 * nc)) ** nc)
-        # ReL = the laminar to transitional flow Reynolds number (dimensionless)
-        rel = 3470 - 1370 * nc
-        # ReT = the laminar to transitional flow Reynolds number (dimensionless)
-        ret = 4270 - 1370 * nc
-        # fp = the collar fanning friction factor (dimensionless)
-        if rec < rel:
-            fc = FluidFlowType(16, rec, rel, ret, nc).laminar_flow()
-        elif ret < rec:
-            fc = FluidFlowType(16, rec, rel, ret, nc).transient_flow()
-        elif rel < rec < ret:
-            fc = FluidFlowType(16, rec, rel, ret, nc).turbulent_flow()
-        # Pc = the collar pressure drop (psi)
-        dcpd += fc * vc ** 2 * RHO * L[i] / (25.81 * ID[i])
+# Maximum Standpipe Pressure
+def msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
+    # PaT = total annular pressure loss (psi)
+    apd = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
+    # PpT = total drill string pressure loss (psi)
+    dspd = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
 
-    return dcpd
-"""
+    # PMAX = maximum standpipe pressure (psi)
+    return apd + dspd + SEPD
 
 
-def hsi_dpb_jif(Q, MW, J1, J2, J3, B):
+# ΔPb (Pressure Loss at Bit)
+def dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
+    # Maximum Standpipe Pressure
+    msppd = msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    # The annular pressure drop (psi)
+    apd = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
+    # Drillstring pressure drop
+    dspd = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
+
+    return msppd - apd - dspd - SEPD
+
+
+# Jet optimization
+def ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N):
     # ΔPb (Pressure Loss at Bit)
-    dpb = 156.5 * Q ** 2 * MW / (J1 ** 2 + J2 ** 2 + J3 ** 2) ** 2
+    dpb = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    # At = optimum total nozzle area (in2)
+    at = Q / (2.96 * (1238.5 * C * dpb / RHO) ** 0.5)
+    j = np.array([])
+    j1 = (1303.797 / N * at) ** 0.5
+    np.append(j, j1)
+
+    for i in range(N - 1):
+        j[i + 1] = (1303.797 / (N - i - 1) *
+                    (at - (sum_squared(j) / 1303.797))) ** 0.5
+
+    return j
+
+
+# HSI and JIF
+def hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
+    # ΔPb (Pressure Loss at Bit)
+    dpb = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
     # HHPb (Hydraulic Horsepower at the Bit)
     hhp = Q * dpb / 1714
 
@@ -143,28 +196,12 @@ def hsi_dpb_jif(Q, MW, J1, J2, J3, B):
     hsi = hhp * 1.27 / B ** 2
 
     # Vn (Bit Nozzle Velocity)
-    vn = 417 * Q / (J1 ** 2 + J2 ** 2 + J3 ** 2)
+    vn = 417 * Q / sum_squared(j)
 
     # I.F. (Impact Force)
     jif = vn * Q * MW / 1930
 
-    return hsi, dpb, jif
-
-
-# Not Standpipe Pressure
-def sppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, MW, J1, J2, J3, B):
-    # PaT = total annular pressure loss (psi)
-    apd = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
-    # PpT = total drill string pressure loss (psi)
-    dspd = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
-    # PcT = total drill collar pressure loss (psi)
-    # dcpd = dcpd(Q, RHO, ID, THETA_600, THETA_300, L)
-    # PB = the bit pressure loss (psi)
-    dpb = hsi_dpb_jif(Q, MW, J1, J2, J3, B)[1]
-
-    # PMAX = maximum standpipe pressure (psi)
-    # return apd + dspd + dcpd + dpb
-    return apd + dspd + dpb
+    return hsi, jif
 
 
 main()
