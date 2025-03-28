@@ -2,51 +2,49 @@ import numpy as np
 
 
 def main():
-    # Flow rate
-    Q = 480
+    # Flow rate, gal / min
+    Q = 160
     # Viscometer @ 600 RPM
-    THETA_600 = 300
+    THETA_600 = 38
     # Viscometer @ 300 RPM
-    THETA_300 = 200
+    THETA_300 = 28
     # Viscometer @ 3 RPM
-    THETA_3 = 10
-    # Density
-    RHO = 10
-    # True vertical depth
-    TVD = 10000
-    # Outer diameter of each section
-    OD = np.array([5, 4.5])
-    # Inner diameter of each section
-    ID = np.array([4, 3.5])
-    # Length of each section
-    L = np.array([5000, 5000])
+    THETA_3 = 18
+    # Density, lbm / gal
+    RHO = 12
+    # True vertical depth, ft
+    TVD = 7277
+    # Outer diameter of each section, in
+    OD = np.array([6.5, 2.875])
+    # Inner diameter of each section, in
+    ID = np.array([3, 2.151])
+    # Length of each section, ft
+    L = np.array([4000, 3426])
     # Mud weight
-    MW = 10
-    # Bit size
-    B = 8.5
+    MW = 13
+    # Bit size, in
+    B = 8.375
     # Jet nozzle optimization constant
     # HHP = 0.65, IF = 0.48, balanced = 0.59
     C = 0.59
     # Jet nozzle amount
     N = 3
-    # Surface equipment with: ([40, 55, 5, 40], [3.5, 2.5, 2.25, 3.25]) @ 480 GPM
+    # Surface equipment with: ([40, 55, 5, 40], [3.5, 2.5, 2.25, 3.25]) @ 160 GPM
     # Surface equipment pressure loss (psi)
-    SEPD = 66
-    # Jet nozzle sizes
-    j = ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)
+    SEPD = 8
 
     print(
-        f"Standpipe Pressure: {msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)}")
+        f"Standpipe Pressure (psi): {ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)[1]:.2f}")
     print(
-        f"Equivalent Circulating Density (ECD): {apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[1]}")
+        f"Equivalent Circulating Density (lbs/gal): {apd_ecd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[1]:.2f}")
     print(
-        f"Bit Pressure Drop: {dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)}")
+        f"Bit Pressure Drop (psi): {hsi_jif_pbd(Q, MW, B, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)[2]:.2f}")
     print(
-        f"Horsepower per square inch (HSI): {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[0]}")
+        f"Horsepower per square inch (HHPb/in2): {hsi_jif_pbd(Q, MW, B, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)[0]:.2f}")
     print(
-        f"Jet Impact Force: {hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)[1]}")
+        f"Jet Impact Force (lbf): {hsi_jif_pbd(Q, MW, B, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)[1]:.2f}")
     print(
-        f"Optimum Nozzle Sizes: {ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)}")
+        f"Optimum Nozzle Size (1/32 in): {ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N)[0][-1]:.2f}")
 
     return "Lubricated!"
 
@@ -69,11 +67,10 @@ class FluidFlowType:
              (self.n / self.rel)) + (self.n / self.rel)
 
     def turbulent_flow(self):
-        return ((np.log10(self.na) + 3.93) / 50) / \
-            self.re ** ((1.75 - np.log10(self.na)) / 7)
+        return ((np.log10(self.na) + 3.93) / 50) / self.re ** ((1.75 - np.log10(self.na)) / 7)
 
 
-def apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L):
+def apd_ecd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L):
     apd = 0
 
     for i in range(len(L)):
@@ -133,74 +130,60 @@ def dspd(Q, RHO, ID, THETA_600, THETA_300, L):
         if rep < rel:
             fp = FluidFlowType(16, rep, rel, ret, np_val).laminar_flow()
         elif ret < rep:
-            fp = FluidFlowType(16, rep, rel, ret, np_val).transient_flow()
-        elif rel < rep < ret:
             fp = FluidFlowType(16, rep, rel, ret, np_val).turbulent_flow()
+        elif rel < rep < ret:
+            fp = FluidFlowType(16, rep, rel, ret, np_val).transient_flow()
         # Pp = the pipe pressure drop (psi)
         dspd += fp * vp ** 2 * RHO * L[i] / (25.81 * ID[i])
 
     return dspd
 
 
-# Maximum Standpipe Pressure
-def msppd(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
-    # PaT = total annular pressure loss (psi)
-    apd_val = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
-    # PpT = total drill string pressure loss (psi)
-    dspd_val = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
-
-    # PMAX = maximum standpipe pressure (psi)
-    return apd_val + dspd_val + SEPD
-
-
-# ΔPb (Pressure Loss at Bit)
-def dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
-    # Maximum Standpipe Pressure
-    msppd_val = msppd(Q, THETA_600, THETA_300, THETA_3,
-                      RHO, TVD, OD, ID, L, SEPD)
-    # The annular pressure drop (psi)
-    apd_val = apd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
-    # Drillstring pressure drop
-    dspd_val = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
-
-    return msppd_val - apd_val - dspd_val - SEPD
-
-
 # Jet optimization
 def ons(Q, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N):
-    # ΔPb (Pressure Loss at Bit)
-    dpb_val = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
-    # At = optimum total nozzle area (in2)
+    apd_val = apd_ecd(Q, THETA_300, THETA_3, RHO, TVD, OD, ID, L)[0]
+    dspd_val = dspd(Q, RHO, ID, THETA_600, THETA_300, L)
+
+    # Bit pressure drop
+    # Good hydraulics normally result when
+    # between 50% to 65% of surface pressure is utilized at the bit
+    # We used 60%
+    dpb_val = (apd_val + dspd_val + SEPD) * (6 / 4)
+
     at = Q / (2.96 * (1238.5 * C * dpb_val / RHO) ** 0.5)
+    # Nozzle sizes
     j = np.zeros(N)
-    j1 = (1303.797 / N * at) ** 0.5
-    j = np.append(j, j1)
 
-    for i in range(N - 1):
-        j[i + 1] = (1303.797 / (N - i - 1) *
-                    (at - (np.sum(j ** 2) / 1303.797))) ** 0.5
+    for i in range(N):
+        j[i] = ((1303.797 / (N - i)) * (at - (np.sum(j ** 2) / 1303.797))) ** 0.5
 
-    return j
+    return j, dpb_val / 0.6
 
 
 # HSI and JIF
-def hsi_jif(Q, MW, j, B, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD):
+def hsi_jif_pbd(Q, MW, B, C, RHO, THETA_600, THETA_300, THETA_3, TVD, OD, ID, L, SEPD, N):
+
+    # Jet nozzle sizes
+    j_val = ons(Q, C, RHO, THETA_600, THETA_300,
+                THETA_3, TVD, OD, ID, L, SEPD, N)[0]
+
     # ΔPb (Pressure Loss at Bit)
-    dpb_val = dpb(Q, THETA_600, THETA_300, THETA_3, RHO, TVD, OD, ID, L, SEPD)
+    pbd_val = 156.5 * Q ** 2 * MW / (np.sum(j_val ** 2)) ** 2
+
     # HHPb (Hydraulic Horsepower at the Bit)
-    hhp = Q * dpb_val / 1714
+    hhp = Q * pbd_val / 1714
 
     # HHPb/in2 (Hydraulic Horsepower per Square Inch of the Bit Area)
     # Optimized Drilling Range: 2.5 - 5.0
     hsi = hhp * 1.27 / B ** 2
 
     # Vn (Bit Nozzle Velocity)
-    vn = 417 * Q / np.sum(j ** 2)
+    vn = 417 * Q / (np.sum(j_val ** 2))
 
     # I.F. (Impact Force)
     jif = vn * Q * MW / 1930
 
-    return hsi, jif
+    return hsi, jif, pbd_val
 
 
 main()
